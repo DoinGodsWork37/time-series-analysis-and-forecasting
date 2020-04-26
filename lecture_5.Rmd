@@ -1,0 +1,88 @@
+---
+title: "Lecture 4"
+author: "Joshua Goldberg"
+date: "`r format(Sys.time(), '%B, %d %Y')`"
+always_allow_html: yes
+output:
+  pdf_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r Global-options, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.asp=0.618, fig.path='Figs/',
+                      warning=FALSE, message=FALSE)
+```
+
+```{r Preamble, echo=FALSE}
+# Enter package in p_load()
+# If package is not installed, p_load() will install and load the package
+if(!"pacman" %in% rownames(installed.packages())) {
+  install.packages("pacman")
+  }
+pacman::p_load(tidyverse, ggthemes, here, tseries, tsibble, forecast)
+
+# Set default ggplot theme to tufte
+theme_set(ggthemes::theme_tufte())
+```
+
+```{r Copy-files, echo=FALSE, eval=FALSE}
+# Enter files to load to project directory in from = "~/Downloads/your_file_name_here"
+file.copy(from = "~/Downloads/", to = here::here(), 
+          overwrite = TRUE, recursive = FALSE, 
+          copy.mode = TRUE)
+```
+
+AIC has a large bias when your sample size is small or when K is large.
+
+R reports corrected (AICC).
+
+If your residual mean is above or below zero, add bias to predictions to correct.
+
+```{r}
+bld.mbb.bootstrap(WWWusage, 5) %>% data.frame() %>% gather() %>% 
+  group_by(key) %>% 
+  mutate(row = row_number()) %>% 
+  ggplot(aes(row, value, color = key)) + 
+  geom_line()
+```
+
+```{r}
+bootstraps <- imap(rep(5, 100), function(x, i) {
+  bld.mbb.bootstrap(WWWusage, x) %>% data.frame() %>% gather() %>% 
+    group_by(key) %>% 
+    mutate(row = row_number(),
+           group = i)
+  }
+) %>% bind_rows()
+
+bootstraps_frame <- bootstraps %>% 
+  ungroup() %>% 
+  mutate(bs = rep(1:(nrow(bootstraps) / 100), each = 100))
+```
+
+```{r}
+library(gganimate)
+
+bootstraps_frame %>% 
+  ggplot(aes(row, value, color = factor(group))) + 
+  geom_line() +
+  theme(legend.position = "none") +
+  scale_color_viridis_d() +
+  labs(title = 'Bootstrap group: {frame_time}') +
+  scale_size(range = c(2, 12)) +
+  transition_time(group) +
+  ease_aes("linear")
+
+bootstraps_frame %>% 
+  ggplot(aes(row, value, color = factor(bs))) + 
+  geom_line() +
+  theme(legend.position = "none") +
+  scale_color_viridis_d() +
+  transition_states(bs,
+                    transition_length = 2,
+                    state_length = 1)
+```
+
+
+

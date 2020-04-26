@@ -1,0 +1,395 @@
+---
+title: "Assignment 1"
+author: "Joshua Goldberg"
+date: "`r format(Sys.time(), '%B, %d %Y')`"
+header-includes:
+  - \usepackage{amsmath}
+output:
+  pdf_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r Global-options, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.asp=0.618, fig.path='Figs/',
+                      warning=FALSE, message=FALSE)
+```
+
+```{r Preamble, echo=FALSE}
+# Enter package in p_load()
+# If package is not installed, p_load() will install and load the package
+if(!"pacman" %in% rownames(installed.packages())) {
+  install.packages("pacman")
+  }
+pacman::p_load(tidyverse, ggthemes, here, glue)
+
+# Set default ggplot theme to tufte
+theme_set(ggthemes::theme_tufte())
+```
+
+```{r Copy-files, echo=FALSE, eval=FALSE}
+# Enter files to load to project directory in from = "~/Downloads/your_file_name_here"
+file.copy(from = "~/Downloads/", to = here::here(), 
+          overwrite = TRUE, recursive = FALSE, 
+          copy.mode = TRUE)
+```
+
+### 2.1
+Supppose $E(X)=2$, $Var(X)=9$, $E(Y)=0$, $Var(Y)=4$, and $Corr(X,Y)=.25$. Find:
+```{r}
+mean_x <- 2
+mean_y <- 0
+var_x <- 9
+var_y <- 4
+corr_xy <- .25
+```
+
+(a) $Var(X+Y)$
+  
+    $Var(X,Y)=Var(X)+Var(Y)+2Cov(X,Y)$
+
+    $Corr(X,Y)=\frac{Cov(X,Y)}{\sigma_x\sigma_y}$
+
+Solve for $Cov(X,Y)$ and use $Var(X,Y)$ equation for solution:
+
+```{r}
+cov_xy <- sqrt(var_x * var_y) * corr_xy
+glue("Answer: {(var_x_plus_y <- var_x + var_y + 2 * cov_xy)}")
+```
+
+(b) $Cov(X, X+Y)$
+
+    $Cov(X, X+Y)=Cov(X,X)+Cov(X,Y)$
+    $Cov(X, X+Y)=Var(X)+Cov(X,Y)$
+    
+```{r}
+glue("Answer: {var_x + cov_xy}")
+```
+
+(c) $Corr(X+Y, X-Y)$
+
+$$
+Corr(X+Y,X-Y)=\frac{Cov(X+Y, X-Y)}{\sqrt{Var(X+Y)Var(X-Y)}}
+$$
+
+\vspace{5mm}
+
+$$
+\begin{aligned}
+    Cov(X+Y,X-Y)&=Cov(X,X-Y)+Cov(Y,X-Y) \\
+    &=Cov(X,X)-Cov(X,Y)+Cov(Y,X)-Cov(Y,Y) \\
+    &=Cov(X,X)-Cov(Y,Y) \\
+    &=Var(X)-Var(Y) \\
+    &=9-4 \\
+    &=5
+\end{aligned}
+$$
+
+```{r}
+(cov_x_plus_y_x_minus_y <- var_x - var_y)
+```
+
+$$
+\begin{aligned}
+    Var(X-Y)=Var(X)+Var(Y)-2Cov(X,Y)
+\end{aligned}
+$$
+
+```{r}
+(var_x_minus_y <- var_x + var_y - 2 * cov_xy)
+```
+
+```{r}
+glue("Answer: {cov_x_plus_y_x_minus_y / (sqrt(var_x_plus_y * var_x_minus_y))}")
+```
+
+### 2.2
+If $X$ and $Y$ are dependent but $Var(X)=Var(Y)$, find $Cov(X+Y,X-Y)$.
+
+$$
+\begin{aligned}
+    Cov(X+Y,X-Y)&=Cov(X,X-Y)+Cov(Y,X-Y) \\
+    &=Cov(X,X)-Cov(X,Y)+Cov(Y,X)-Cov(Y,Y) \\
+    &=Cov(X,X)-Cov(Y,Y) \\
+    &=Var(X)-Var(Y) \\
+\end{aligned}
+$$
+
+However, the variance of $X$ $Y$ are equal, so:
+
+```{r}
+glue("Answer: {0}")
+```
+
+### 2.5
+Suppose $Y_t=5+2t+X_t$, where $\{X_t\}$ is a zero-mean stationary series with autocovariance function $\gamma_k$.
+
+(a) Find the mean function for $\{Y_t\}$
+
+$$
+\begin{aligned}
+    E[Y_t]&=E[5+2t+X_t] \\
+    &=E[5]+E[2t]+E[X_t] \\
+    &=5+2t+0 \\
+    &=5+2t \\
+\end{aligned}
+$$
+
+(b) Find the autocovariance function for $\{Y_t\}$.
+
+$$
+\begin{aligned}
+    Cov(Y_t,Y_{t-k})&=Cov(5+2t+X_t,5+2(t-k)+X_{t-k})\\
+    &=Cov(X_t,X_{t-k}) \\
+    &=\gamma_k
+\end{aligned}
+$$
+
+(c) Is $\{Y_t\}$ stationary? Why or why not? $\{Y_t\}$ is not stationary because the mean value depends on time.
+
+### 2.6
+Let $\{X_t\}$ be a stationary time series, and define $Y_t=\begin{cases}X_t\\X_t+3 \end{cases}$ for $t$ odd and $t$ even, respectively.
+
+(a) Show that $Cov(Y_t,Y_{t-k})$ is free of $t$ for all lags $k$.
+
+Even:
+
+$$
+\begin{aligned}
+    &=Cov(X_t+3,X_{t-k}+3) \\
+    &=Cov(X_t,X_{t-k}) \\
+    &=Cov(X_t)
+\end{aligned}
+$$
+
+Odd:
+
+$$
+\begin{aligned}
+    &=Cov(X_t,X_{t-k}) \\
+    &=Cov(X_t)
+\end{aligned}
+$$
+
+(b) Is $\{Y_t\}$ stationary?
+
+The time series is not stationary due to the expected value depending on $t$:
+
+$$
+\begin{aligned}
+    E[Y_t]=\begin{cases}E[X_t]\\ E[X_t+3]=E[X_t]+E[3]\end{cases}
+\end{aligned}
+$$
+
+### 2.7
+Suppose that $\{Y_t\}$ is stationary with autocovariance function $\gamma_k$.
+
+(a) Show that $W_t=\triangledown Y_t=Y_t-Y_{t-1}$ is stationary by finding the mean and autocovariance function for $\{W_t\}$.
+
+Mean:
+
+$$
+\begin{aligned}
+    E[W_t]&=E[Y_t-Y_{t-1}] \\
+    &=E[Y_t]-E[Y_{t-1}] \\
+    &=0
+\end{aligned}
+$$
+Auto covariance only depends on k, concluding the stationarity of $\{W_t\}$:
+
+$$
+\begin{aligned}
+    Cov[W_t]&=Cov(Y_t-Y_{t-1},Y_{t-k}-Y_{t-k-1}) \\
+    &=Cov(Y_t,Y_{t-k})+Cov(Y_t,-Y_{t-k-1})+Cov(-Y_{t-1},Y_{t-k})+Cov(-Y_{t-1},-Y_{t-k-1}) \\
+    &=\gamma_k-\gamma_{k-1}-\gamma_{k+1}+\gamma_k \\
+    &=2\gamma_k-\gamma_{k-1}-\gamma_{k+1}
+\end{aligned}
+$$
+
+(b) Show that $U_t=\triangledown^2Y_t=\triangledown[Y_t-Y{t-1}]=Y_t-2Y_{t-1}+Y_{t-2}$ is stationary (You need not find the mean and autocovariance function for $\{U_t\}$.)
+
+In (a), the derived that the difference between two stationary time series concludes $\triangledown Y_t$ as stationary also. This holds true for $\triangledown^2Y_t$
+
+### 2.8
+Suppose that $\{Y_t\}$ is stationary with autocovariance function $\gamma_k$. Show that for any fixed positive integer $n$ and any constants $c_1,c_2,...,c_n$, the process $\{W_t\}$ defined by $W_t=c_1Y_t+c_2Y_{t-1}+\cdots+c_nY_{t-n+1}$ is stationary. (Note that Exercise 2.7 is a special case of this result.)
+
+The expected value is constant:
+
+$$
+\begin{aligned}
+  E[W_t]&=c_1E[Y_t]+c_2E[Y_t]+\dots+c_nE[Y_t] \\
+        &=E[Y_t](c_1+c_2+\dots+c_n)
+\end{aligned}
+$$
+
+$Cov(W_t)$ is free from $t$:
+
+$$
+\begin{aligned}
+  Cov[W_t] & = Cov[c_1 Y_t + c_2 Y_{t-1} + \dots + c_n Y_{t-k}, c_1 Y_{t-k} + c_2 Y_{t-k-1} + \dots + c_n Y_{t-k-n}] \\
+                  & = \sum_{i=0}^n c_i\sum_{j=0}^n c_j Cov[Y_{t-j}Y_{t-i-k}] \\
+                  & = \sum_{i=0}^n c_i \sum_{j=0}^n c_j \gamma_{j-k-i},
+\end{aligned}
+$$
+
+Therefore, $W_t$ is stationary.
+
+### 2.11
+Suppose $Cov(X_t,X_{t-k})=\gamma_k$ is free of $t$ but that $E[X_t]=3t$.
+
+(a) Is $\{X_t\}$ stationary?
+
+    $\{X_t\}$ varies with $t$. Therefore, it is not stationary.
+
+(b) Let $Y_t=7-3t+X_t$. Is $\{Y_t\}$ stationary?
+
+$$
+\begin{aligned}
+  E[Y_t]&=3-3t+E[X_t] \\
+  &=7-3t-3t \\
+  &=7
+\end{aligned}
+$$
+$$
+\begin{aligned}
+Cov[Y_t,Y_{t-k}]&=[7-3t+X_t,7-3(t-k)+X_{t-k}] \\ 
+&=Cov[X_t, X_{t-k}] \\
+&=\gamma_k
+\end{aligned}
+$$
+
+Since the mean is constant and the autocovariance is free of $t$, $\{Y_t\}$ is stationary.
+
+### 2.12
+Suppose that $Y_t=e_t-e_{t-12}$. Show that $\{Y_t\}$ is stationary and that, for $k>0$, its autocorrelation function is nonzero only for lag $k=12$.
+
+Mean:
+
+$$
+\begin{aligned}
+E[Y_t]&=E[e_t-e_{t-12}] \\
+&=E[e_t]-E[e_{t-12}] \\
+&=0
+\end{aligned}
+$$
+
+Autocovariance:
+
+$$
+\begin{aligned}
+Cov(Y_t,Y_{t-k})&=Cov(e_t-e_{t-12},e_{t-k}-e_{t-12-k})
+\end{aligned}
+$$
+
+$k=12$: 
+
+$$
+\begin{aligned}
+&=Cov(e_t,e_{t-12}) + Cov(e_t,-e_{t-12-12})+Cov(-e_{t-12},e_{t-12})+Cov(-e_{t-12-12}) \\
+&=0+0-Cov(e_{t-12},e_{t-12})+0 \\
+&=-\sigma^2_\epsilon
+\end{aligned}
+$$
+All terms are correlated except when $k=12$ (autocorrelation is 1).
+
+### 2.14
+Evaluate the mean and covariance function for each of the follow processes. In each case, determine whether or not the process is stationary.
+
+(a) $Y_t=\theta_0+te_t$.
+
+Mean:
+
+$$
+\begin{aligned}
+E[Y_t]&=\theta_0+tE[e_t] \\
+&=\theta_0
+\end{aligned}
+$$
+
+Covariance:
+
+$$
+\begin{aligned}
+Cov(Y_t,Y_{t-k})&=Cov(\theta_0+te_t,\theta_0+(t-k)e_{t-k}) \\
+&=Cov(te,(t-k)e_{t-k}) \\
+&=Cov(te_t,te_{t-k}-ke_{t-k}) \\
+&=Cov(te_t,te_{t-k}) + Cov(te_t,-ke_{t-k}) \\
+&=t^2Cov(e_t,e_{t-k},-tk(e_t,e_{t-l})
+\end{aligned}
+$$
+
+This time series is not stationary due to autocovariance depending on $t^2$.
+
+(b) $W_t=\triangledown Y_t$, where $Y_t$ is as given in part (a).
+
+Mean: 
+
+$$
+\begin{aligned}
+  E[W_t]&=E[\triangledown Y_t] \\
+  &=E[\theta_0 + te_t - \theta_0 - (t-1)e_{t-1}] \\
+  &=tE[e_t] - tE[e_{t-1} + E[e_{t-1}] \\
+  &=0
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+Var[\triangledown Y_t]&=Var[t e_t] \\
+&=-Var[(t-1)e_{t-1}] \\
+&=t^2 \sigma_e^2 - (t-1)^2 \sigma_e^2 = \sigma_e^2 (t^2 - t^2 + 2t - 1) = (2t-1)\sigma_e^2
+\end{aligned}
+$$
+
+Varies with $t$. Therefore, it is not stationary.
+
+(c) $Y_t=e_te_{t-1}$ (You may assume that ${e_t}$ is normal white noise.)
+
+$$
+\begin{aligned}
+  E[Y_t]&=E[e_t e_{t-1}] \\ 
+  &=E[e_t] E[e_{t-1}] \\
+  &=0
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+Cov[Y_t,Y_{t-1}]&=Cov[e_t e_{t-1}, e_{t-1} e_{t-2}] \\
+&=E[(e_t e_{t-1} - \mu_t^2)(e_{t-1} e_{t-2} - \mu_t^2)] \\
+&=E[e_t]E[e_{t-1}]E[e_{t-1}]E[e_{t-2}] \\
+&=0
+\end{aligned}
+$$
+Since mean and covariance are zero, the time series is stationary.
+
+### 2.15
+Suppose that X is a random variable with zero mean. Define a time series by $Y_t=(-1)^tX$.
+
+(a) Find the mean function for $\{Y_t\}$.
+
+$$
+\begin{aligned}
+E[Y_t]&=E[(-1)^tX] \\
+&=(-1)^2E[X] \\
+&=0
+\end{aligned}
+$$
+
+(b) Find the covariance function for $\{Y_t\}$.
+
+$$
+\begin{aligned}
+Cov(Y_t)&=Cov((-1)^tX,(-1)^{t-k}X) \\
+&=(-1)^t(-1)^{t-k}Cov(X,X) \\
+&=(-1)^{2t-k}\sigma^2_x
+\end{aligned}
+$$
+
+For even or odd k, covariance does not depend on $t$.
+
+(c) Is \{Y_t\} stationary? The time series is stationary since the mean is 0 and the covariance is free of $t$.
+
+
+
+

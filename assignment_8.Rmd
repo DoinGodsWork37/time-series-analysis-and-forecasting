@@ -1,0 +1,577 @@
+---
+title: 'Assignment 8: CME Monthly Seat Prices'
+author: "Joshua Goldberg"
+date: "`r format(Sys.time(), '%B, %d %Y')`"
+output:
+  pdf_document: default
+  github_document: null
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: inline
+always_allow_html: yes
+---
+
+```{r Global-options, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.asp=0.618, fig.path='Figs/',
+                      warning=FALSE, message=FALSE)
+```
+
+```{r Preamble, echo=FALSE}
+# Enter package in p_load()
+# If package is not installed, p_load() will install and load the package
+if(!"pacman" %in% rownames(installed.packages())) {
+  install.packages("pacman")
+  }
+pacman::p_load(tidyverse, ggthemes, here, tsibble, lubridate, tsibble, zoo,
+               tseries, rlang, broom, forecast, janitor, lubridate, readxl,
+               fpp, xts, TSA, fracdiff, imputeTS, fGarch, rugarch)
+
+filter <- dplyr::filter
+
+options(stringsAsFactors = FALSE)
+
+# Set default ggplot theme to tufte
+theme_set(ggthemes::theme_tufte())
+```
+
+# Data
+
+```{r}
+all_divisions <- readRDS("all_divisions_clean.rds") %>%
+  mutate(division = tolower(division))
+
+all_divisions_train <-
+  all_divisions %>% filter_index("2001 Jan" ~ "2012 Dec")
+
+all_divisions_test <- all_divisions %>%
+  anti_join(all_divisions_train, c("division", "year_month"))
+
+contracts_volume <-
+  read_csv("Contracts_Volume.csv") %>% clean_names()
+
+contracts_classification <-
+  read_csv("Contracts_Classification.csv") %>%
+  clean_names() %>%
+  mutate(division = tolower(division))
+```
+
+# Tasks
+
+## Prep data
+
+1. Commodities are traded on the Floor (crazy people screaming at each other in the pits like you have seen in movies) and electronically. The Volume data set has Total volume and Electronic volume.
+
+```{r}
+contracts_volume <- contracts_volume %>% 
+  mutate(floor_volume = total_volume - electronic_volume,
+         date = mdy(date))
+```
+
+1. Sort out of the volume data, those commodities that are relevant for the particular badge (CME, IMM, IOM). Keep in mind that the CME can trade EVERYTHING, not just what the list says.
+
+1. Aggregate the data for each Commodity Indicator for each month. Don't worry about futures / options, just add them all up.
+
+1. Create a table that looks like this:
+Date Elec.Vol Tot.Vol Flo.Vol
+01/01/2001 4,769,234 31,746,144 26,976,910
+
+```{r}
+contract_volume_divisions <- contracts_volume %>%
+  inner_join(contracts_classification,
+             by = c("commodity_indicator" = "commodity_code"))
+```
+
+```{r}
+filter_volume <-
+  function(.data,
+           .division,
+           .date = list(floor = "2001-01-01", ceiling = "2012-12-01"),
+           .date_format = "%Y-%m-%d",
+           test_set = FALSE) {
+    dates <- map(.date, ~ lubridate::as_date(.x, .date_format))
+    if (.division %in% c("iom", "imm")) {
+      .data <- .data %>% filter(division == .division)
+    }
+    
+    if (.division == "cme") {
+      .data <- .data
+    }
+    
+    if (test_set) {
+      .data <- .data %>% filter(date >= dates)
+    } else {
+      .data <- .data %>% filter(between(date, dates$floor, dates$ceiling))
+    }
+    .data
+  }
+
+aggregate_volume <- function(.data) {
+  .data %>% 
+    group_by(date) %>%
+    summarize(
+      total_volume = sum(total_volume) %>% as.double(),
+      electronic_volume = sum(electronic_volume) %>% as.double(),
+      floor_volume = sum(floor_volume) %>% as.double()
+    ) %>% 
+    mutate(year_month = yearmonth(date)) %>% 
+    select(year_month, everything(), -date)
+}
+
+transform_by_division <- function(.division, .data, ...) {
+  .data %>%
+    filter_volume(.division, ...) %>%
+    aggregate_volume()
+}
+
+divisions <-
+  c(
+    cme = "cme",
+    imm = "imm",
+    iom = "iom"
+  )
+
+train_volumes <-
+  map(divisions, transform_by_division, contract_volume_divisions)
+
+test_volumes <-
+  map(
+    divisions,
+    ~ transform_by_division(
+      .division = .x,
+      .data = contract_volume_divisions,
+      .date = "2013-01-01",
+      test_set = TRUE
+    )
+  )
+
+train_volumes$cme
+test_volumes$cme
+```
+
+# Exploratory data analysis
+
+Your task is to use the trading volume information to forecast the CME monthly seat price for 2013. It is recommended to do exploratory data analysis to find initial data relationships such as correlations. For example, the total trade volume for all CME products might be a good predictor for CME seat class, but not for the others. You may have to choose and select which commodities have influence on the IMM and IOM seat prices.
+
+```{r}
+explore_price_volume <- train_volumes %>%
+  bind_rows(.id = "division") %>%
+  left_join(all_divisions_train, c("division", "year_month")) %>%
+  group_by(division) %>%
+  mutate(
+    floor_vs_price = cor(floor_volume, price),
+    elect_vs_price = cor(electronic_volume, price),
+    total_vs_price = cor(total_volume, price),
+    elect_vs_total = cor(electronic_volume, total_volume),
+  ) %>% 
+  gather(key = corr_group, value = corr, -c(1:7))
+
+explore_price_volume %>%
+  filter(corr_group != "elect_vs_total") %>%
+  ggplot(aes(division, corr, fill = corr_group)) +
+  geom_col(position = "dodge") +
+  scale_fill_viridis_d(
+    name = NULL,
+    labels = c("Elect vs. Price", 
+               "Floor vs. Price", 
+               "Total vs. Price")
+  ) +
+  scale_x_discrete(labels = toupper) +
+  scale_y_continuous(
+    breaks = seq(
+      plyr::round_any(min(explore_price_volume$corr), .10, ceiling),
+      max(explore_price_volume$corr),
+      .20
+    ),
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  labs(title = "Volumes vs. Price",
+       x = "Division",
+       y = "Correlation (Pearson)")
+```
+
+CME shows the strongest relationship across the aggregate volumes, with electronic and total representing the highest at `r (explore_price_volume %>% filter(corr_group == "elect_vs_price" & division == "cme"))$corr %>% unique()` and `r (explore_price_volume %>% filter(corr_group == "total_vs_price" & division == "cme"))$corr %>% unique()`, respectively. We will use `total_volume` as a predictor for CME/IMM since electronic and total are strongly correlated, as see in the plot below. IOM's highest correlation with `price` is `floor_volume`.
+
+```{r}
+explore_price_volume %>%
+  filter(corr_group == "elect_vs_total") %>%
+  ggplot(aes(division, corr, fill = corr_group)) +
+  geom_col(position = "dodge") +
+  scale_fill_viridis_d() +
+  scale_x_discrete(labels = toupper) +
+  scale_y_continuous(
+    breaks = seq(
+      plyr::round_any(min(explore_price_volume$corr), .10, ceiling),
+      max(explore_price_volume$corr),
+      .20
+    ),
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  labs(
+    title = "Electronic vs. Total",
+    subtitle = "Significant correlation for all divisions",
+    x = "Division",
+    y = "Correlation (Pearson)"
+  ) +
+  theme(legend.position = "none")
+```
+
+
+# Modeling
+
+## Linear regression
+
+Linear regression (seat price is independent, volume(s) dependent).
+
+```{r}
+model_price_volume <-
+  explore_price_volume %>%
+  select(-contains("vs"),-contains("corr")) %>%
+  distinct() %>%
+  split(.$division) %>%
+  map(
+    ~ .x %>% 
+      ungroup %>% 
+      mutate(year_month = yearmonth(year_month)) %>% 
+      as_tsibble(key = division, index = year_month)
+  )
+
+lm_formulas <- c(
+  cme = price ~ total_volume,
+  imm = price ~ total_volume,
+  iom = price ~ floor_volume
+)
+
+lm_models <-
+  map2(lm_formulas, model_price_volume,
+       function(.formula, .data) {
+         lm(.formula, data = .data)
+       })
+```
+
+```{r}
+checkresiduals(lm_models$cme)
+```
+
+```{r}
+checkresiduals(lm_models$imm)
+```
+
+```{r}
+checkresiduals(lm_models$iom)
+```
+
+We see that a simple linear regression is fraught with residual issues, including auto correlation for double-digit lags and non-randomness.
+
+## Linear regression with ARMA errors (use arima with xreg)
+
+```{r}
+lm_arma_params <- rlang::list2(
+  cme = list(price = quo(price), total_volume = quo(total_volume)),
+  imm = list(price = quo(price), total_volume = quo(total_volume)),
+  iom = list(price = quo(price), floor_volume = quo(floor_volume))
+)
+
+lm_arma_models <-
+  map2(lm_arma_params, model_price_volume,
+       function(.params, .data) {
+         
+         .data <- .data %>% ungroup()
+         price <- .data %>% select(!!.params[[1]]) %>% 
+           as.ts(frequency = 12)
+         xreg <- .data %>% select(!!.params[[2]]) %>% 
+           as.ts(frequency = 12)
+         auto.arima(price, xreg = xreg)
+       })
+```
+
+IMM looks better. However, we still have auto-correlation issues with CME/IOM.
+
+```{r}
+checkresiduals(lm_arma_models$cme)
+```
+
+```{r}
+checkresiduals(lm_arma_models$imm)
+```
+
+```{r}
+checkresiduals(lm_arma_models$iom)
+```
+
+## Holts Winters
+
+```{r}
+fit_hw <-
+  function(.ts, seasonal = TRUE, mult = FALSE) {
+    if (seasonal == TRUE) {
+      if (mult) {
+        model <-
+          HoltWinters(.ts, seasonal = "mult")
+      } else {
+        model <- HoltWinters(.ts)
+      }
+      
+    } else {
+      model <- HoltWinters(.ts, gamma = FALSE)
+    }
+    model
+  }
+
+hw_models <-
+  map(model_price_volume, function(.data) {
+    fit_hw(.data %>% 
+             select(price, year_month) %>% 
+             as.ts(frequency = 12))
+  })
+```
+
+Holt Winters does a pretty good job with all three divisions. Auto-correlation is less of a problem and residuals look closer to white noise. However, CME variance in residuals spikes after 2007.
+
+```{r}
+checkresiduals(hw_models$cme)
+```
+
+```{r}
+checkresiduals(hw_models$imm)
+```
+
+```{r}
+checkresiduals(hw_models$iom)
+```
+
+## ARIMA
+
+```{r}
+fit_arima <-
+  function(.ts) {
+    auto.arima(.ts, seasonal = FALSE)
+  }
+
+arima_models <-
+  map(model_price_volume, function(.data) {
+    fit_arima(.data %>% 
+                select(price, year_month) %>% 
+                as.ts(frequency = 12))
+  })
+```
+
+ARIMA is another good model for these data, but we have the same increasing variance problem for CME after 2007.
+
+```{r}
+checkresiduals(arima_models$cme)
+```
+
+```{r}
+checkresiduals(arima_models$imm)
+```
+
+```{r}
+checkresiduals(arima_models$iom)
+```
+
+## SARIMA (seasonality is monthly)
+
+```{r}
+fit_sarima <-
+  function(.ts) {
+    model <- auto.arima(.ts, D = 1)
+  }
+
+sarima_models <-
+  map(model_price_volume, function(.data) {
+    fit_sarima(.data %>% 
+                 select(price, year_month) %>% 
+                 as.ts(frequency = 12))
+  })
+```
+
+There is no benefit to increased complexity from SARIMA. We still have the same issues with residuals.
+
+```{r}
+checkresiduals(sarima_models$cme)
+```
+
+```{r}
+checkresiduals(sarima_models$imm)
+```
+
+```{r}
+checkresiduals(sarima_models$iom)
+```
+
+## Fractional ARIMA (ARFIMA)
+
+```{r}
+fit_arfima <-
+  function(.ts) {
+    model <- forecast::arfima(.ts)
+  }
+
+arfima_models <-
+  map(model_price_volume, function(.data) {
+    fit_arfima(.data %>% 
+                 select(price, year_month) %>% 
+                 as.ts(frequency = 12))
+  })
+```
+
+Fractional provides no benefits to our model fitting exercise.
+
+```{r}
+checkresiduals(arfima_models$cme)
+```
+
+```{r}
+checkresiduals(arfima_models$imm)
+```
+
+```{r}
+checkresiduals(arfima_models$iom)
+```
+
+## ARMA and GARCH combination - use the fGarch R library and garchFit()
+
+```{r}
+fit_garch <-
+  function(.ts) {
+    arima_model <- auto.arima(.ts, seasonal = FALSE)
+        .spec <- ugarchspec(
+          variance.model = list(
+          mean.model = list(
+            armaOrder = arimaorder(arima_model),
+            include.mean = T
+          ),
+          distribution.model = "std"
+          )
+        )
+    ugarchfit(spec = .spec, data = .ts)
+  }
+
+garch_models <-
+  map(model_price_volume, function(.data) {
+    fit_garch(.data %>% select(price, year_month) %>% as.ts(frequency = 12))
+  })
+```
+
+In spite of not fixing variance, GARCH does a good job reducing auto correlation.
+
+```{r}
+checkresiduals(garch_models$cme@fit)
+```
+
+```{r}
+checkresiduals(garch_models$imm@fit)
+```
+
+```{r}
+checkresiduals(garch_models$iom@fit)
+```
+
+## Model evaluation using sMAPE
+
+### Test data
+
+```{r}
+test_price_volume <- test_volumes %>% 
+  bind_rows(.id = "division") %>%
+  left_join(all_divisions_test, c("division", "year_month")) %>% 
+  distinct() %>%
+  split(.$division) %>%
+  map(
+    ~ .x %>% 
+      ungroup %>% 
+      mutate(year_month = yearmonth(year_month)) %>% 
+      as_tsibble(key = division, index = year_month)
+  )
+```
+
+### Evaluation 
+
+```{r}
+smape <-
+  function(prediction, actual) {
+    pred_vs_actual <- abs(prediction - actual)
+    n <- length(prediction)
+    sum(pred_vs_actual / ((abs(actual) + abs(prediction)) / 2)) / n
+  }
+
+lm_smape <-
+  map2(lm_models,
+       test_price_volume,
+       ~ predict(.x, newdata = .y) %>%
+         smape(.y$price))
+
+lm_arma_smape <-
+  pmap(list(lm_arma_params, lm_arma_models, test_price_volume),
+       function(.params, .model, .data) {
+         .data <- .data %>% ungroup()
+         xreg <-
+           .data %>% select(!!.params[[2]]) %>% as.ts(frequency = 12)
+         forecast(.model, xreg = xreg)$mean %>%
+           smape(.data$price)
+       })
+
+hw_smape <-
+  map2(hw_models,
+       test_price_volume,
+       ~ forecast(.x, 12)$mean %>%
+         smape(.y$price))
+
+arima_smape <-
+  map2(arima_models,
+       test_price_volume,
+       ~ forecast(.x, 12)$mean %>%
+         smape(.y$price))
+
+sarima_smape <-
+  map2(sarima_models,
+       test_price_volume,
+       ~ forecast(.x, 12)$mean %>%
+         smape(.y$price))
+
+arfima_smape <-
+  map2(arfima_models,
+       test_price_volume,
+       ~ forecast(.x, 12)$mean %>%
+         smape(.y$price))
+
+garch_smape <-
+  map2(garch_models,
+       test_price_volume,
+       ~ as.vector(fitted(ugarchforecast(.x, n.ahead = 12))) %>% 
+         smape(.y$price))
+```
+
+We recommend any of the three models: ARIMA, HW, GARCH. Each performed relatively strongly with correctness of forecast. Additionally, these models had more favorable residual diagnostics than the high error models.
+
+```{r}
+smape_df <- bind_rows(
+  lm_smape = lm_smape,
+  lm_arma_smape = lm_arma_smape,
+  hw_smape = hw_smape,
+  arima_smape = arima_smape,
+  sarima_smape = sarima_smape,
+  arfima_smape = arfima_smape,
+  garch_smape = garch_smape,
+  .id = "model"
+) %>% 
+  gather(key = division, value = smape, -1) %>% 
+  group_by(model) %>% 
+  mutate(total_smape = sum(smape)) %>%
+  ungroup()
+
+smape_df %>%
+  ggplot(aes(fct_reorder(model, total_smape), smape, fill = division)) +
+  geom_col(position = "dodge") +
+  scale_fill_viridis_d(name = NULL, labels = toupper) +
+  scale_x_discrete(
+    labels = function(x)
+      str_remove_all(x, "_smape") %>% toupper
+  ) +
+  labs(title = "Best models: ARIMA, HW, GARCH",
+       x = "Model",
+       y = "sMAPE")
+```
+
+

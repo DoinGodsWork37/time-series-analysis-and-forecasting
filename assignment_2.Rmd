@@ -1,0 +1,222 @@
+---
+title: "Assignment 2: Time Series Regression"
+author: "Joshua Goldberg"
+date: "`r format(Sys.time(), '%B, %d %Y')`"
+always_allow_html: yes
+output:
+  pdf_document: default
+  github_document: 
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r Global-options, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.asp=0.618, fig.path='Figs/',
+                      warning=FALSE, message=FALSE)
+```
+
+```{r Preamble, echo=FALSE}
+# Enter package in p_load()
+# If package is not installed, p_load() will install and load the package
+if(!"pacman" %in% rownames(installed.packages())) {
+  install.packages("pacman")
+  }
+pacman::p_load(tidyverse, ggthemes, here, tsibble, lubridate, tseries, rlang, broom)
+
+# Set default ggplot theme to tufte
+theme_set(ggthemes::theme_tufte())
+```
+
+```{r Copy-files, echo=FALSE, eval=FALSE}
+# Enter files to load to project directory in from = "~/Downloads/your_file_name_here"
+file.copy(from = "~/Downloads/Assign 2 TS regression.csv", to = here::here(), 
+          overwrite = TRUE, recursive = FALSE, 
+          copy.mode = TRUE)
+```
+
+# Data Description
+
+```{r}
+stock_data <- read_csv("Assign 2 TS regression.csv") %>% 
+  mutate(date = dmy(date)) %>% 
+  gather(key = stock, value = return, -1)
+
+stock_data_ts <- stock_data %>%
+  as_tsibble(key = id(stock), index = date)
+```
+
+
+All are daily stock exchange returns.
+
+ISE: Istanbul stock exchange national 100 index
+
+SP: Standard & Poor™s 500 return index
+
+DAX: Stock market return index of Germany
+
+FTSE: Stock market return index of UK
+
+NIKKEI: Stock market return index of Japan
+
+BOVESPA: Stock market return index of Brazil
+
+# Questions
+
+Determine if all the TS are stationary: 
+
+1. qualitatively: the data for each stock all look stationary. $\mu$ and $\sigma^2$ remain constant overtime. Oscillations are offset by each other.
+
+```{r}
+stock_data_ts %>% 
+  ggplot(aes(date, return, color = stock)) +
+  geom_line() +
+  scale_x_date(date_breaks = "6 month", date_minor_breaks = "3 month", date_labels = "%m-%y") +
+  scale_color_viridis_d(name = "Stock") +
+  facet_wrap( ~ stock) +
+  labs(x = "Date",
+       y = "Return",
+       caption = "date format: MM/YY")
+```
+
+2. quantitatively: use __ADF__ and __KPSS__ from package tseries.
+
+```{r warning=TRUE}
+(stationary_tests <- stock_data_ts %>% 
+  nest(-stock) %>% 
+  mutate(adf_test = map(data, ~ suppressWarnings(adf.test(.x$return))),
+         kpss_test = map(data, ~ suppressWarnings(kpss.test(.x$return))),
+         adf_p_value = map_df(adf_test, ~ glance(.x)) %>% pull(p.value),
+         kpss_p_value = map_df(kpss_test, ~ glance(.x)) %>% pull(p.value)))
+
+stationary_tests %>% 
+  gather(key = key, value = value, -c(1:4)) %>% 
+  ggplot(aes(stock, value, fill = key)) +
+  geom_col(position = "dodge") +
+  geom_hline(yintercept = .05, linetype = 2) +
+  annotate("text", -Inf, .0575, label = "Null Rejection Threshold", hjust = 0, vjust = 1) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_viridis_d(name = "Hypothesis Test", labels = c("ADF", "KPSS")) +
+  labs(title = "Determining stationarity with ADF and KPSS",
+       x = "Stock",
+       y = "P-Value") +
+  theme(legend.position = "top")
+```
+
+2. Split the data into train and test, keeping only the last 10 rows for test (from date 9-Feb-11). Remember to use only train dataset. 
+
+```{r}
+model_data <- stock_data_ts %>% 
+  spread(stock, return)
+
+train <- model_data %>% 
+  filter(date < "2011-02-09")
+
+test <- model_data %>% 
+  anti_join(train, "date")
+```
+
+3. Linearly regress ISE against the remaining 5 stock index returns. Determine which coefficients are equal or better than 0.02 (*) level of significance.
+
+```{r}
+lm_model <- lm(ISE ~ BOVESPA + DAX + FTSE + NIKKEI + SP, data = train)
+summary(lm_model)
+```
+
+```{r}
+signif_vars <- function(model) {
+  model %>% 
+    tidy() %>% 
+    slice(-1) %>% 
+    filter(p.value < .02) %>% pull(term) 
+}
+
+signif_vars(lm_model)
+```
+
+Significant variables: `r signif_vars(lm_model)`.
+
+4. For the non-significant coefficients, continue to lag by 1 day until all coefficients are significant at 0.01 (*). Use `slide()` function from package __DataCombine__. Remember you will need to lag, so you slideBy = -1 each step. How many lags are needed for each independent variable?
+
+```{r}
+# Define shift function to take a dataframe, variable, and shift direction and return a respective dataframe with the new modified variable
+shift_var <- function(.data, .var, .shift_by) {
+  .var <- enquo(.var)
+  shift_direction <- ifelse(.shift_by > 0, "lead", "lag")
+  column_name <- paste0(quo_name(.var), "_", shift_direction, abs(.shift_by))
+  
+  .data %>% 
+    mutate(!! column_name := DataCombine::shift(!! .var, shiftBy = .shift_by, reminder = FALSE))
+}
+
+lagged_train <- train %>% 
+  shift_var(BOVESPA, .shift_by = -1) %>% 
+  shift_var(SP, .shift_by = -2)
+
+lagged_train %>% 
+  select(date, contains("lag")) %>% 
+  head()
+```
+
+Two and one lag(s) were needed for `SP` and `BOVESPA`, respectively.
+
+```{r}
+lm_model_lag <- lm(ISE ~ BOVESPA_lag1 + DAX + FTSE + NIKKEI + SP_lag2, data = lagged_train)
+summary(lm_model_lag)
+```
+
+5. Find correlations between ISE and each independent variable. Sum the square of the correlations. How does it compare to R-squared from #4?
+
+```{r}
+cor.test(lagged_train$ISE, lagged_train$BOVESPA)
+
+vars <- c("BOVESPA_lag1", "DAX", "NIKKEI", "FTSE", "SP_lag2")
+
+cors <- map(vars, ~ cor.test(lagged_train$ISE, lagged_train[, .x][[1]])) %>% 
+   map_dbl("estimate")
+
+sum(cors^2)
+```
+
+Sum the square of the correlations is `r sum(cors^2)`.
+
+6. Concept question 1: why do you think the R-squared in #4 is so much less than the sum of square of the correlations? The much higher result compared to $R^2$ is due to collinearity between the independent variables:
+
+```{r}
+cor(lagged_train %>% 
+      .[complete.cases(.), ] %>% 
+      as_tibble() %>% 
+      select(-date, -BOVESPA, -SP) %>% 
+      as.matrix()) %>% 
+  corrplot::corrplot()
+```
+
+7. Take the test dataset and perform the same lags from #4 and call `predict()` function using the lm regression object from #4. Why do you need to use the lm function object from #4? Because this is the model we used for the training data with the lagged sequences, which has statistically significant variables.
+
+```{r}
+lagged_test <- test %>% 
+  shift_var(BOVESPA, .shift_by = -1) %>% 
+  shift_var(SP, .shift_by = -2)
+
+test_predictions <- lagged_test[complete.cases(lagged_test), ] %>% 
+  mutate(preds = lm_model_lag %>% predict(newdata = lagged_test[complete.cases(lagged_test), ]),
+         squared_errors = (preds - ISE)^2,
+         rmse = mean(sqrt(squared_errors))) %>% 
+  select(date, ISE, preds, squared_errors, rmse)
+```
+
+We see that the predictions roughlt follow the trend, but not perfectly. So we have some bias in the model.
+
+```{r}
+test_predictions %>% 
+  select(-rmse, -squared_errors) %>% 
+  gather(key = key, value = value, -date) %>% 
+  ggplot(aes(date, value, color = key)) +
+  geom_point() +
+  geom_line() +
+  scale_color_viridis_d()
+```
+
+
+# Concept question 2: what do you find in #1 and why? 
+
+We find that both qualitatively and quantitatively that the time series are stationary. Since both of these methods agree, the conclusion is likely sound. 

@@ -1,0 +1,195 @@
+---
+title: "Assignment 4: Unemployment and GDP"
+author: "Joshua Goldberg"
+date: "`r format(Sys.time(), '%B, %d %Y')`"
+always_allow_html: yes
+output:
+  pdf_document: default
+  github_document: 
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r Global-options, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.asp=0.618, fig.path='Figs/',
+                      warning=FALSE, message=FALSE)
+```
+
+```{r Preamble, echo=FALSE}
+# Enter package in p_load()
+# If package is not installed, p_load() will install and load the package
+if(!"pacman" %in% rownames(installed.packages())) {
+  install.packages("pacman")
+  }
+pacman::p_load(tidyverse, ggthemes, here, tsibble, lubridate, tsibble, zoo,
+               tseries, rlang, broom, forecast, janitor, lubridate, readxl,
+               fpp, xts, TSA)
+
+options(stringsAsFactors = FALSE)
+
+# Set default ggplot theme to tufte
+theme_set(ggthemes::theme_tufte())
+```
+
+# Data/Objective
+
+The daily data is from Illinois Dept of Transporation (IDOT) for I80E 1EXIT (the 2nd data column) - note each data point is an hourly count of the number of vehicles at a specific location on I80E.
+
+Use the daily data for last 2 weeks of June 2013 to develop an ARIMA forecasting model.
+
+Objective is to forecast the hourly counts for July 1.
+
+The actual data file for July 1 is included for you to test your estimate.
+
+```{r}
+data_files <- data.frame(
+  file_name = dir("traffic-flow/"),
+  date = ymd(dir("traffic-flow/") %>% str_remove_all("^I-57-|.xls$"))
+) %>% slice(-1)
+
+test_files <- data.frame(
+  file_name = dir("traffic-flow/"),
+  date = ymd(dir("traffic-flow/") %>% str_remove_all("^I-57-|.xls$"))
+) %>% slice(1)
+
+extract_excel <- function(file_name, date) {
+  readxl::read_xls(
+    paste("traffic-flow/", file_name, sep = "/"),
+    skip = 2,
+    range = cell_cols("C:E")
+  ) %>%
+    slice(3:(nrow(.) - 2)) %>%
+    select(Time, I80E) %>%
+    janitor::clean_names() %>%
+    mutate(date = date,
+           date_time = as.POSIXct(paste(date, time), format = "%Y-%m-%d %H:%M",
+                                  tz = Sys.timezone(location = TRUE)))
+}
+
+train_data <- pmap_df(data_files, extract_excel) %>%
+  mutate_at(vars(i80e), as.numeric) %>%
+  as_tsibble(index = "date_time")
+
+test_data <- pmap_df(test_files, extract_excel) %>%
+  mutate_at(vars(i80e), as.numeric) %>%
+  as_tsibble(index = "date_time")
+```
+
+# Explore
+
+```{r}
+ggAcf(train_data$i80e)
+ggPacf(train_data$i80e)
+```
+
+Augmented Dickey-Fuller Test
+
+```{r}
+adf.test(train_data$i80e)
+```
+
+
+# Modeling
+
+## Part 1
+
+Use `ARIMA(p, d, q)` model to forecast. Find the model returned by R `auto.arima()`. Change the values of p and q and determine the best model using AICc and BIC. Do AICc and BIC select the same model as the best model?
+
+```{r}
+train_auto <- auto.arima(train_data$i80e, seasonal = FALSE)
+train_auto
+```
+
+Exploring more models.
+
+```{r}
+parameters <- list(mod2 = c(2, 0, 3), mod3 = c(3, 0, 3), mod4 =c(3, 0, 2), mod5 = c(3, 0, 1))
+models <- map(parameters, ~ Arima(train_data$i80e, order = .x))
+models
+```
+
+AIC and BIC select the same model.
+
+```{r}
+aiccs <- map_dbl(models, "aicc") %>% sort(decreasing = TRUE)
+bics <- map_dbl(models, "bic") %>% sort(decreasing = TRUE)
+
+glue::glue("AIC{2:5}: {aiccs}")
+cat("\n")
+glue::glue("BIC{2:5}: {bics}")
+```
+
+Examining residuals and normality for each models.
+
+```{r}
+walk(models, ~ checkresiduals(.x))
+```
+
+# Part 2
+
+Use day of the week seasonal `ARIMA(p,d,q)(P,Q,D)s` model to forecast for July 1 (which is a Monday) - note use the hourly data.
+
+```{r}
+train_daily <- ts(train_data$i80e, start = c(16, 1), frequency = 24 * 7)
+autoplot(train_daily)
+
+model_day_of_week = auto.arima(train_daily, seasonal = TRUE)
+summary(model_day_of_week)
+```
+
+Let's forecast the values for July 1st.
+
+```{r}
+forecast_day_of_week <- forecast(model_day_of_week, h = 24)
+plot(forecast_day_of_week)
+```
+
+
+# Part 3
+
+Use hour of the day seasonal `ARIMA(p,d,q)(P,D,Q)s` model to forecast for the hours 8:00, 9:00, 17:00 and 18:00 on July 1.
+
+```{r}
+train_hourly = ts(train_data$i80e, start = c(16, 1), frequency = 24)
+autoplot(train_hourly)
+```
+
+```{r}
+model_hourly = auto.arima(train_hourly, seasonal = TRUE)
+summary(model_hourly)
+```
+
+```{r}
+forecast_hourly <- forecast(model_hourly, h = 24)
+plot(forecast_hourly)
+```
+
+# Part 4
+
+For the July 1 8:00, 9:00, 17:00 and 18:00 forecasts, which model is better (part 2 or part 3)?
+
+```{r}
+test_data_ts <- ts(test_data[, 3], start = c(16, 1), frequency = 24)
+```
+
+
+```{r}
+indexes <- c(8, 9, 17, 18)
+test_data_ts[indexes]
+forecast_day_of_week$mean[indexes]
+forecast_hourly$mean[indexes]
+```
+
+```{r}
+sse_weekly = sum((forecast_day_of_week$mean[indexes] - test_data_ts[indexes])^2)
+sse_hourly = sum((forecast_hourly$mean[indexes] - test_data_ts[indexes])^2)
+
+glue::glue("see_weekly: {sse_weekly}")
+glue::glue("sse_hourly: {sse_hourly}")
+```
+
+Based on SSE, the weekly model performs better.
+
+
+
+

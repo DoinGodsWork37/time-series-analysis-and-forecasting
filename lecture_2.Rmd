@@ -1,0 +1,105 @@
+---
+title: "Lecture 2"
+author: "Joshua Goldberg"
+date: "`r format(Sys.time(), '%B, %d %Y')`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+editor_options:
+  chunk_output_type: inline
+always_allow_html: yes
+---
+
+```{r Global-options, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.asp=0.618, fig.path='Figs/',
+                      warning=FALSE, message=FALSE)
+```
+
+```{r Preamble, echo=FALSE}
+# Enter package in p_load()
+# If package is not installed, p_load() will install and load the package
+if(!"pacman" %in% rownames(installed.packages())) {
+  install.packages("pacman")
+  }
+pacman::p_load(tidyverse, ggthemes, here)
+
+# Set default ggplot theme to tufte
+theme_set(ggthemes::theme_tufte())
+```
+
+```{r Copy-files, echo=FALSE, eval=FALSE}
+# Enter files to load to project directory in from = "~/Downloads/your_file_name_here"
+file.copy(from = "~/Downloads/", to = here::here(), 
+          overwrite = TRUE, recursive = FALSE, 
+          copy.mode = TRUE)
+```
+
+# Making your time series stationary
+
+First difference is a good time series to make it stationary.
+
+Stationary has many more powerful tools than non-stationary.
+
+Any process that has a unit root is stationary ??
+
+# Forecasting
+
+Holt Winters model
+
+Use when there is seasonality or trend. If one is missing, put zero for the variable.
+
+## Two types
+
+Additive
+
+Multiplicative
+
+# Regression
+
+Time series regression: you have to ensure the time series is station.
+
+## WOLD decomposition
+
+A stationary (weak until stated otherwise) time series $y_t$ can be expressed as a sum of: 2TS = deterministic + stochastic.
+
+Any stationary time series you can represent it as a stochastic process with white noise.
+
+$y_t=\sum^\infty_{i=0} \psi w_{t-i}+\eta_t$
+
+$\eta_t$ is deterministic
+$\w_{t-i}$ is white noise
+$\psi$ are the deviations (it's a constant weight)
+
+$\psi_0=1$ and $\sum^\infty_{i=1}<\infty$
+
+What is the underlying data generation process when we observe a time series.
+
+For all stationary processes it is a summation of white noise and deterministic (which can be zero).
+
+You do not always need a non-zero for $\eta_t$.
+
+$\mu$ will be deterministic in a time series.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

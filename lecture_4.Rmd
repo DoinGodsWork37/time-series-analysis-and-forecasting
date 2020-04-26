@@ -1,0 +1,49 @@
+---
+title: "Lecture 4"
+author: "Joshua Goldberg"
+date: "`r format(Sys.time(), '%B, %d %Y')`"
+always_allow_html: yes
+output:
+  pdf_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r Global-options, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.asp=0.618, fig.path='Figs/',
+                      warning=FALSE, message=FALSE)
+```
+
+```{r Preamble, echo=FALSE}
+# Enter package in p_load()
+# If package is not installed, p_load() will install and load the package
+if(!"pacman" %in% rownames(installed.packages())) {
+  install.packages("pacman")
+  }
+pacman::p_load(tidyverse, ggthemes, here, tseries, tsibble, forecast)
+
+# Set default ggplot theme to tufte
+theme_set(ggthemes::theme_tufte())
+```
+
+```{r Copy-files, echo=FALSE, eval=FALSE}
+# Enter files to load to project directory in from = "~/Downloads/your_file_name_here"
+file.copy(from = "~/Downloads/", to = here::here(), 
+          overwrite = TRUE, recursive = FALSE, 
+          copy.mode = TRUE)
+```
+
+# ACF, AR, MA
+
+## Partial ACF
+
+Correlation between $Y_t$ and $Y_{t-k}$ afte rremoving the effect of intermate $Y_{t-1}$, $Y_{t-2}$, ...$Y_{t-k+1}$
+
+Pure seasonal model error has auto correlation.
+
+Anything that's predictable through some context is non-stationary. You have to take it out.
+
+When you difference, you're enhancing the noise in the time series.
+
+
+

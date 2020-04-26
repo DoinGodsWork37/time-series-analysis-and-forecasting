@@ -1,0 +1,212 @@
+---
+title: "Lecture 3"
+author: "Joshua Goldberg"
+date: "`r format(Sys.time(), '%B, %d %Y')`"
+always_allow_html: yes
+output:
+  pdf_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r Global-options, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.asp=0.618, fig.path='Figs/',
+                      warning=FALSE, message=FALSE)
+```
+
+```{r Preamble, echo=FALSE}
+# Enter package in p_load()
+# If package is not installed, p_load() will install and load the package
+if(!"pacman" %in% rownames(installed.packages())) {
+  install.packages("pacman")
+  }
+pacman::p_load(tidyverse, ggthemes, here, tseries, tsibble, forecast)
+
+# Set default ggplot theme to tufte
+theme_set(ggthemes::theme_tufte())
+```
+
+```{r Copy-files, echo=FALSE, eval=FALSE}
+# Enter files to load to project directory in from = "~/Downloads/your_file_name_here"
+file.copy(from = "~/Downloads/", to = here::here(), 
+          overwrite = TRUE, recursive = FALSE, 
+          copy.mode = TRUE)
+```
+
+# Data transformations
+
+1. Decouple mean and variance as close as possible to making them constant
+
+2. Model additive: simpler than exponential
+
+3. Reshape residuals
+
+## Box Cox Transformation
+
+$y_t$ 
+
+$\lambda=0$: $logy_t$
+
+For the above, you must add $x$ to all observations, which will just shift the distribuition
+
+Otherwise: $\frac{y_t^\lambda-1}{x}$
+
+# Simple operators
+
+Backward shift operator $\beta$
+
+$\beta z_t=t_{t-1}$
+
+$\beta^m z_t=t_{t-m}$
+
+Forward shift operator  $F$
+
+$Fz_t=z_{t+1}$
+
+$F^mz_t=z_{t+m}$
+
+$$
+\begin{aligned}
+\triangledown y_t&=y_t-y_{t-1} \\
+&=y_t-\beta y_t \\
+&=(1-\beta)y_t
+\end{aligned}
+$$
+
+## Autoregressive (AR)
+
+Current value is a finite linear regression of past values:
+
+Define: $\Phi(\beta)=1-\phi\beta-\phi_2\beta^-...-\phi_p\beta^p$
+
+$$
+\begin{aligned}
+y_t&=\phi_1y_t-1+\phi_2y_t-2+...+\phi_py_t-p+\epsilon_t \\
+&=\phi\beta y_t+\phi_2\beta^2 y_t+...+\phi_p\beta^p y_t+\epsilon_t \\
+&=y_t-\phi_1\beta y_t-\phi_2\beta^2 y_t-...-\phi_p\beta^p y_t = \epsilon_t \\
+(1-\phi_1\beta-\phi_2]beta^2-...-\phi_p\beta^p) &= \epsilon_t
+\end{aligned}
+$$
+Finally:
+
+$\Phi(\beta)y_t=\epsilon_t$ is an auto-regressive process.
+
+When you find a characteristic function of the data generation process, you want find out if it has a unit-root; if it does, it is guranteed to be non-stationary. If any root relies on unity, we know the time series cannot be stationary; an autogressive time model only works with stationary time series.
+
+Linear regression only works with stationary time series.
+
+Very few natural processes have an instantenous effect. You need to figure out the lag effect.
+
+$$
+AR(1) \\
+[y_t=\phi_1y_{t-1}+\epsilon_t]y_{t-k} \\
+E[y_ty_{t-k}=\phi_1y_{t-1}y_{t-k}+\epsilon_ty_{t-k}]
+$$
+
+$\phi<1=$ stationary time series.
+
+Always: $\epsilon_ty_{t-k}=0$
+
+If $\phi$ is negative, acf will oscillate. 
+
+## Moving average (MA)
+
+$y_t=\epsilon_t-\theta_1\epsilon_{t-1}-\theta_2\epsilon_{t-2}-...-\theta_q\epsilon_{t-q}$
+
+Define: $\theta_q(\beta)=1-\theta_1\beta-\theta_2\beta^2-...-\theta_q\beta^q$
+
+$$
+\begin{aligned}
+y_t&=(1-\theta_1\beta-\theta_2\beta^2-...-\theta_q\beta^q)\epsilon_t \\
+y_t&=\theta_q(\beta)\epsilon_t=MA(q)
+\end{aligned}
+$$
+
+Weights of moving average do not have to add up to one.
+
+In moving average case, stationarity is almost guranteed since you're dealing with white noise, which is stationary. Less constraints for moving average. There are other constraints for a moving average model in order for it to work properly.
+
+$$
+\begin{aligned}
+y_t&=\epsilon_t-\theta\epsilon_{t-1} \\
+&=y_t+\theta\epsilon_{t-1}
+\end{aligned}
+$$
+
+Invertibility of an AR model
+
+Infinite series:
+
+$$\epsilon_t=y_t+\theta y_{y-1}+\theta^2y_{t-2}+\theta^3y_{t-3}...$$
+
+You can convert an AR to an MA, but you will have an explosion of parameters.
+
+Choose AR or AR(P) + MA(q). They do better together.
+
+ARMA (p, q)
+ARIMA = p, d, q
+
+```{r}
+library(tseries)
+```
+
+```{r}
+ts.plot(lynx)
+```
+
+
+```{r}
+lambda <- BoxCox.lambda(lynx)
+lambda
+
+ts.plot(BoxCox(lynx, lambda))
+```
+
+```{r}
+ar1 <- arima.sim(list(order = c(1, 0, 0), ar = 0.75), n = 100)
+ts.plot(ar1)
+```
+
+```{r}
+ma1 <- arima.sim(list(order = c(0, 0, 1), ma = 0.9), n = 100)
+ts.plot(ma1)
+```
+
+If it is AR1 process, you want $\phi<1$.
+
+If it is AR2 process, you want
+$\phi_1+\phi_2<1$
+$\phi_2-\phi_1<1$
+$|\phi_2|<1$
+
+```{r}
+arma21 <-
+  arima.sim(list(
+    order = c(2, 0, 1),
+    ar = c(0.9,-0.75),
+    ma = 0.9
+  ), n = 100)
+
+ts.plot(arma21)
+```
+
+```{r}
+model <- auto.arima(arma21)
+
+plot(forecast(model, h = 10))
+```
+
+Workflow:
+
+* Determination: what model will you use for your problem? HOLT winters, AR model, MR model, ARIMA model
+
+* Specify the model: in case of ARIMA, specify p, d, q
+
+* Estimation of parameters
+
+* Evaluation
+
+Try `Arima`. You can pass the model and data.
+
+
+

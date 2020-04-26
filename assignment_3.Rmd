@@ -1,0 +1,290 @@
+---
+title: "Assignment 3: Unemployment and GDP"
+author: "Joshua Goldberg"
+date: "`r format(Sys.time(), '%B, %d %Y')`"
+always_allow_html: yes
+output:
+  pdf_document: default
+  github_document: 
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r Global-options, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.asp=0.618, fig.path='Figs/',
+                      warning=FALSE, message=FALSE)
+```
+
+```{r Preamble, echo=FALSE}
+# Enter package in p_load()
+# If package is not installed, p_load() will install and load the package
+if(!"pacman" %in% rownames(installed.packages())) {
+  install.packages("pacman")
+  }
+pacman::p_load(tidyverse, ggthemes, here, tsibble, lubridate, tseries, rlang, broom, forecast)
+
+# Set default ggplot theme to tufte
+theme_set(ggthemes::theme_tufte())
+```
+
+```{r Copy-files, echo=FALSE, eval=FALSE}
+# Enter files to load to project directory in from = "~/Downloads/your_file_name_here"
+file.copy(from = "~/Downloads/Unemployment_GDP_UK.xlsx", to = here::here(), 
+          overwrite = TRUE, recursive = FALSE, 
+          copy.mode = TRUE)
+```
+
+# Load data
+
+```{r}
+raw_data <- readxl::read_excel("Unemployment_GDP_UK.xlsx") %>% 
+  tidyr::fill(Year, .direction = "down") %>% 
+  gather(key = metric, value = value, -c(1, 2)) %>% 
+  janitor::clean_names() %>% 
+  mutate(month = case_when(
+    quarter == 1 ~ 03,
+    quarter == 2 ~ 06,
+    quarter == 3 ~ 09,
+    quarter == 4 ~ 12
+  ),
+  day = case_when(
+    quarter == 1 ~ 31,
+    quarter == 2 ~ 30,
+    quarter == 3 ~ 30,
+    quarter == 4 ~ 31
+  ),
+  date = ymd(glue::glue("{year}-{month}-{day}"))) %>% 
+  mutate(qtr = yearquarter(date)) %>% 
+  as_tsibble(key = "metric", index = "qtr") %>% 
+  select(qtr, metric, value)
+
+train_data <- raw_data %>% 
+  filter_index("1955 Q1" ~ "1968 Q4")
+
+test_data <- raw_data %>% 
+  filter_index("1968 Q4" ~ "1969 Q4")
+```
+
+# Explore data
+
+GDP shows a steady upward trend, while Unemployment shows some signs of seasonality. Considering the trend for GDP may assist in identifying stationarity.
+
+```{r}
+metric_labels <- list(
+  "GDP" = "Gross Domestic Product",
+  "UN" = "Unemployment"
+)
+
+metric_labeller <- function(variable, value) {
+  metric_labels[value]
+}
+
+train_data %>% 
+  ggplot(aes(qtr, value, color = metric)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Data does not appear to be stationary",
+       subtitle = "Statistical measures appear to depend on time",
+       x = "Quarter",
+       y = "Value") +
+  facet_wrap( ~ metric, nrow = 2, scales = "free", labeller = metric_labeller) +
+  scale_color_viridis_d(name = NULL, begin = .25, end = .80)
+```
+
+`adf.test` confirms non-stationarity. `kpss.test` agrees with this as well. We see that GDP is stationary when considering the trend.
+
+```{r}
+train_data %>% 
+  split(.$metric) %>% 
+  map( ~ tseries::adf.test(.x$value))
+
+train_data %>% 
+  split(.$metric) %>% 
+  map( ~ tseries::kpss.test(.x$value, null = "Trend"))
+```
+
+The ACF plot confirms the non-stationarity of the data for unemployment due to the oscillation of the ACF plot. 
+
+```{r}
+un_data <- train_data %>% 
+  filter(metric == "UN") %>% 
+  pull(value)
+
+acf(un_data)
+pacf(un_data)
+```
+
+GDP shows a declining ACF with no non-zero lags that are not significant, which agrees with our generally observation that the process is stationary.
+
+```{r}
+gdp_data <- train_data %>% 
+  filter(metric == "GDP") %>% 
+  pull(value)
+
+acf(gdp_data)
+pacf(gdp_data)
+```
+
+
+# ARIMA modeling
+
+1. Use datasets from 1955 to 1968 to build an ARMA or ARIMA models for UN and GDP. Use `auto.arima()` from package forecast.
+
+```{r}
+un_boxcox <- BoxCox.lambda(un_data)
+
+un_arima_model <- auto.arima(
+  un_data,
+  lambda = un_boxcox,
+  max.p = 20,
+  max.P = 20,
+  max.D = 20,
+  max.Q = 20,
+  max.q = 20,
+  max.order = 20
+)
+
+summary(un_arima_model)
+```
+
+```{r}
+gdp_boxcox <- BoxCox.lambda(gdp_data)
+gdp_arima_model <- auto.arima(gdp_data, lambda = gdp_boxcox)
+summary(gdp_arima_model)
+```
+
+```{r}
+gdp_arima_model <- auto.arima(gdp_data)
+summary(gdp_arima_model)
+```
+
+GDP model has a much better AIC without `BoxCox.lambda`, so this model is preferred.
+
+2. Justify why you chose (ARMA or ARIMA) one over the other. Note there will be 2 models, one for UN and another for GDP.
+
+`auto.arima` fixes differencing at 1, so ARIMA is preferred in this case due to the transformation required to achieve stationarity.
+
+3. Compare your forecasts with the actual values using error = actual - estimate and plot the errors.
+
+```{r}
+un_test <- test_data %>% 
+  filter(metric == "UN") %>% 
+  pull(value)
+
+gdp_test <- test_data %>% 
+  filter(metric == "GDP") %>% 
+  pull(value)
+
+un_pred <- forecast(un_arima_model, h = 4)
+gdp_pred <- forecast(gdp_arima_model, h = 4)
+
+plot(un_pred, main = "Unemployment Forecast with Confidence Intervals")
+legend(
+  1,
+  2500,
+  legend = c("Prediction", "Actual"),
+  col = c("blue", "green"),
+  pch = c(15, 15)
+)
+points(
+  x = c(57:60),
+  y = un_test,
+  col = "green",
+  pch = 15
+)
+
+plot(gdp_pred, main = "GDP Forecast with Confidence Intervals")
+legend(
+  1,
+  115,
+  legend = c("Prediction", "Actual"),
+  col = c("blue", "green"),
+  pch = c(19, 15)
+)
+points(
+  x = c(57:60),
+  y = gdp_test,
+  col = "green",
+  pch = 15
+)
+```
+
+```{r}
+preds <- data.frame(pred = c(gdp_pred$mean %>% as.vector(), un_pred$mean %>% as.vector()))
+
+errors <- test_data %>% 
+  bind_cols(preds) %>% 
+  mutate(error = value - pred)
+
+errors
+```
+
+5. Calculate the sum of squared error for each UN and GDP models.
+
+```{r}
+errors %>% 
+  as_tibble() %>% 
+  group_by(metric) %>% 
+  summarise(sum_squared_errors = sqrt(sum(error^2)))
+```
+
+# Regression
+
+1. Unemployment as the independent variable and GDP as the dependent variable - use data from 1955 to 1968 to build the model. Forecast for 1969 and plot the errors as a percentage of the mean. Also calculate the sum of squared(error) as a percentage of the mean.
+
+```{r}
+lm_train_data <- train_data %>% 
+  spread(metric, value)
+
+lm_test_data <- test_data %>% 
+  spread(metric, value)
+
+gdp_un_lm <- lm(GDP ~ UN, lm_train_data)
+summary(gdp_un_lm)
+```
+
+```{r}
+(errors <- lm_test_data %>% 
+   as_tibble() %>% 
+   mutate(error = GDP - predict(gdp_un_lm, lm_test_data),
+         pct_mean = (error / mean(UN)) * 100))
+
+errors %>% 
+  as_tibble() %>% 
+  summarise(total_mean_pct_error = (sum(pct_mean^2) / mean(GDP)) * 100)
+```
+
+GDP as the independent variable and UN as the dependent variable - use data from 1955 to 1968 to build the model. Forecast for 1969 and plot the errors as a percentage of the mean. Also calculate the sum of squared(error) as a percentage of the mean of the actual values.
+
+```{r}
+lm_train_data <- train_data %>% 
+  spread(metric, value)
+
+lm_test_data <- test_data %>% 
+  spread(metric, value)
+
+un_gdp_lm <- lm(UN ~ GDP, lm_train_data)
+summary(un_gdp_lm)
+```
+
+```{r}
+(errors <- lm_test_data %>% 
+   as_tibble() %>% 
+   mutate(error = UN - predict(un_gdp_lm, lm_test_data),
+          pct_mean = (error / mean(UN)) * 100))
+
+errors %>% 
+  as_tibble() %>% 
+  summarise(total_mean_pct_error = (sum(pct_mean^2) / mean(UN)) * 100)
+```
+
+3. Compare the 2 models using the sum of squared error as a percentage of the mean of the actual values - any reason to believe which should be the independent and the dependent variable?
+
+If only on the basis of squared error as a percentage, the model with GDP as the response and UN as the independent performs better.
+
+
+
+
+
+
+
